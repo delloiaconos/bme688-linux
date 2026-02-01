@@ -3,10 +3,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
+
+#include <sys/time.h>
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
-#include <time.h>
-#include <errno.h>
+
 
 #include "bme68xLibrary.h"
 #include "bme68x.h" 
@@ -141,28 +143,34 @@ int main(int argc, char **argv) {
     while( 1 ) {
         int16_t indexDiff;
         uint8_t nFieldsLeft;
+        struct timeval tv;
 
         sleep( 1 );
         for (uint8_t i = 0; i < N_KIT_SENS; i++) {
-
-          if (bme[i].fetchData()) {
             
-              /* Read all data from sensor */  
-              do{ 
+          if (bme[i].fetchData()) {
+            gettimeofday(&tv, NULL);
+            long long tsms = (long long)tv.tv_sec * 1000LL + tv.tv_usec / 1000;
+            
+            /* Read all data from sensor */  
+            do{ 
                 nFieldsLeft = bme[i].getData(sensorData[i]);
-              } while (nFieldsLeft > 0 );
+            } while (nFieldsLeft > 0 );
 
-              /* Check if new data is received */
-              if (sensorData[i].status & BME68X_NEW_DATA_MSK) {
+            /* Check if new data is received */
+            if (sensorData[i].status & BME68X_NEW_DATA_MSK) {
 
                 /* Inspect miss of data index */
                 indexDiff = (int16_t)sensorData[i].meas_index - (int16_t)lastMeasindex[i];
                 if (indexDiff > 1) {
-                     lastMeasindex[i] = (int16_t)sensorData[i].meas_index;
+                        lastMeasindex[i] = (int16_t)sensorData[i].meas_index;
                 }
                 lastMeasindex[i] = sensorData[i].meas_index;
 
-                printf( "{ \"idx\" : %d,", i );
+                printf( "{ " );
+                printf( "\"idx\" : %d,", i );
+                printf( "\"timestamp\" : %lld,", tsms);
+                printf( "\"measures\" : {" );
                 printf( " \"temperature\" : %f,", sensorData[i].temperature );
                 printf( " \"pressure\" : %f,", sensorData[i].pressure );
                 printf( " \"humidity\" : %f,", sensorData[i].humidity );
@@ -170,8 +178,10 @@ int main(int argc, char **argv) {
                 printf( " \"gas_index\" : %d,", sensorData[i].gas_index );
                 printf( " \"meas_index\" : %d,", sensorData[i].meas_index );
                 printf( " \"idac\" : %d,", sensorData[i].idac );
-                printf( " \"status\" : \"0x%02X\" }\n", sensorData[i].status );
-              }
+                printf( " \"status\" : \"0x%02X\"", sensorData[i].status );
+                printf( "} }\n" );
+
+            }
           }
         }
     }
