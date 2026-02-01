@@ -11,9 +11,7 @@
 #include <time.h>
 #include <errno.h>
 
-#include "bme68x.h"  // Assicura il path corretto della Sensor API Bosch
-
-
+#include "bme68x.h" 
 #ifdef __cplusplus
 extern "C" {
 #endif

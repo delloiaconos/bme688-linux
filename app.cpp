@@ -69,16 +69,19 @@ int main(int argc, char **argv) {
 
     rpi_spi_ctx_t spi_ctx = {
         .fd = spi_fd,
-        .speed_hz = 5000000,    // 5 MHz (BME68x supports up to 10 MHz)
-        .mode = SPI_MODE_0 | SPI_NO_CS,     //| SPI_NO_CS,
+        .speed_hz = 5000000,                // 5 MHz (BME68x supports up to 10 MHz)
+        .mode = SPI_MODE_0 | SPI_NO_CS, 
         .bits_per_word = 8
+    };
+
+    rpi_i2c_ctx_t i2c_ctx = {
+        .fd = i2c_fd,
+        .addr = I2C_TCA6408A_SLAVE_ADDR
     };
 
     for (uint8_t i = 0; i < N_KIT_SENS; i++) {
         ctx[i].spi_ctx = &spi_ctx;
-        ctx[i].i2c_fd = i2c_fd;
-        ctx[i].i2c_addr = I2C_TCA6408A_SLAVE_ADDR;
-
+        ctx[i].i2c_ctx = &i2c_ctx;
         ctx[i].cs_id = 0xFF ^ (1 << i); // active low
 
         if (rpi_bosch_configure( &ctx[i] ) < 0) {

@@ -1,7 +1,3 @@
-#include "rpi_bosch.h"
-#include "rpi_spi.h"
-#include "bme68x.h" 
-
 #include <stdint.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -13,6 +9,8 @@
 #include <errno.h>
 #include <linux/i2c-dev.h>
 
+#include "rpi_bosch.h"
+#include "bme68x.h" 
 
 
 // registri TCA6408a
@@ -28,17 +26,17 @@
 #define OUTPUT_IDLE_STATE           0xFF
 
 /* I2C Helper: ensure slave address (idempotente, ma sicuro) */
-inline int i2c_ensure_slave(int fd, uint8_t addr) {
-    if (ioctl(fd, I2C_SLAVE, addr) < 0) {
+inline int i2c_ensure_slave( rpi_i2c_ctx_t *ctx ) {
+    if (ioctl(ctx->fd, I2C_SLAVE, ctx->addr) < 0) {
         return -1;
     } 
     return 0;
 }
 
 /* I2C Helper: write a register */
-int i2c_write_reg(int fd, uint8_t reg, uint8_t val) {
+int i2c_write_reg( rpi_i2c_ctx_t *ctx, uint8_t reg, uint8_t val) {
     uint8_t buf[2] = { reg, val }; 
-    ssize_t n = write(fd, buf, sizeof(buf));
+    ssize_t n = write(ctx->fd, buf, sizeof(buf));
     if (n != (ssize_t)sizeof(buf)) {
         return -1;
     }
@@ -46,24 +44,24 @@ int i2c_write_reg(int fd, uint8_t reg, uint8_t val) {
 }
 
 /* I2C Helper: read a register */
-int i2c_read_reg(int fd, uint8_t reg, uint8_t *val)
+int i2c_read_reg(rpi_i2c_ctx_t *ctx, uint8_t reg, uint8_t *val)
 {
     if (!val) return -1;
     uint8_t buf[1] = { reg }; 
 
     /* Select register */
-    ssize_t n = write(fd, buf, 1);
+    ssize_t n = write(ctx->fd, buf, 1);
     if (n != 1) return -1;
 
     /* Read register value */
-    n = read(fd, val, 1);
+    n = read(ctx->fd, val, 1);
     if (n != 1) return -1;
 
     return 0;
 }
 
 /* SPI Helper: write a register */
-int8_t spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, rpi_spi_ctx_t *ctx)
+int8_t spi_write(rpi_spi_ctx_t * ctx, uint8_t reg_addr, const uint8_t *reg_data, uint32_t len)
 {
     if (!ctx || ctx->fd < 0) return BME68X_E_NULL_PTR;
 
@@ -96,7 +94,7 @@ int8_t spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, rpi_sp
 
 
 /* SPI Helper: read a register */
-int8_t spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, rpi_spi_ctx_t * ctx)
+int8_t spi_read(rpi_spi_ctx_t * ctx, uint8_t reg_addr, uint8_t *reg_data, uint32_t len)
 {
     if (!ctx || ctx->fd < 0 || !reg_data || len == 0) return BME68X_E_NULL_PTR;
 
@@ -130,9 +128,9 @@ int8_t spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, rpi_spi_ctx_t
 int rpi_bosch_configure( rpi_bosch_ctx_t * ctx )
 {   
     /* CONFIGURE I2C DEVICE */
-    if (ioctl(ctx->i2c_fd, I2C_SLAVE, ctx->i2c_addr) < 0) {
-        fprintf(stderr, "ioctl(I2C_SLAVE, 0x%02X) failed: %s\n", ctx->i2c_addr, strerror(errno));
-        close(ctx->i2c_fd);
+    if (ioctl(ctx->i2c_ctx->fd, I2C_SLAVE, ctx->i2c_ctx->addr) < 0) {
+        fprintf(stderr, "ioctl(I2C_SLAVE, 0x%02X) failed: %s\n", ctx->i2c_ctx->addr, strerror(errno));
+        close(ctx->i2c_ctx->fd);
         return -1;
     } 
 
@@ -153,22 +151,22 @@ int rpi_bosch_configure( rpi_bosch_ctx_t * ctx )
        Sets ALL pins as outputs... 
        TODO: Change!
     */
-    if (i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_CONFIG, 0x00) < 0) {
+    if (i2c_write_reg(ctx->i2c_ctx, TCA6408A_REG_CONFIG, 0x00) < 0) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
-        close(ctx->i2c_fd);
+        close(ctx->i2c_ctx->fd);
         return 1;
     }
 
     /* TCA6480A Input Polarity */
-    if (i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_POLARITY, 0x00) < 0) {
+    if (i2c_write_reg(ctx->i2c_ctx, TCA6408A_REG_POLARITY, 0x00) < 0) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
-        close(ctx->i2c_fd);
+        close(ctx->i2c_ctx->fd);
         return 1;
     }
 
-    if (i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0) {
+    if (i2c_write_reg(ctx->i2c_ctx, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
-        close(ctx->i2c_fd);
+        close(ctx->i2c_ctx->fd);
         return 1;
     }
 
@@ -181,28 +179,28 @@ int8_t rpi_bosch_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, 
 
     rpi_bosch_ctx_t *ctx = (rpi_bosch_ctx_t *) intf_ptr;
 
-    if( !ctx || ctx->i2c_fd < 0 ) {
+    if( !ctx || ctx->i2c_ctx->fd < 0 ) {
         return BME68X_E_NULL_PTR;
     } 
     
-    if( i2c_ensure_slave(ctx->i2c_fd, ctx->i2c_addr) < 0 ) {
+    if( i2c_ensure_slave(ctx->i2c_ctx) < 0 ) {
         return BME68X_E_COM_FAIL;
     }
 
     /* CHIP SELECT */
-    if( i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_OUTPUT, ctx->cs_id) < 0 ) {
+    if( i2c_write_reg(ctx->i2c_ctx, TCA6408A_REG_OUTPUT, ctx->cs_id) < 0 ) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
-        close(ctx->i2c_fd);
+        close(ctx->i2c_ctx->fd);
         return 1;
     }
 
     /* SPI READ */
-    ret = spi_write( reg_addr, reg_data, len, ctx->spi_ctx );
+    ret = spi_write( ctx->spi_ctx, reg_addr, reg_data, len );
 
     /* CHIP UNSELECT */
-    if( i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0 ) {
+    if( i2c_write_reg(ctx->i2c_ctx, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0 ) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
-        close(ctx->i2c_fd);
+        close(ctx->i2c_ctx->fd);
         return 1;
     }
 
@@ -216,28 +214,28 @@ int8_t rpi_bosch_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *i
 
     rpi_bosch_ctx_t *ctx = (rpi_bosch_ctx_t *) intf_ptr;
     
-    if( !ctx || ctx->i2c_fd < 0 ) {
+    if( !ctx || ctx->i2c_ctx->fd < 0 ) {
         return BME68X_E_NULL_PTR;
     } 
     
-    if( i2c_ensure_slave(ctx->i2c_fd, ctx->i2c_addr) < 0 ) {
+    if( i2c_ensure_slave(ctx->i2c_ctx) < 0 ) {
         return BME68X_E_COM_FAIL;
     }
 
     /* CHIP SELECT */
-    if( i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_OUTPUT, ctx->cs_id) < 0 ) {
+    if( i2c_write_reg(ctx->i2c_ctx, TCA6408A_REG_OUTPUT, ctx->cs_id) < 0 ) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
-        close(ctx->i2c_fd);
+        close(ctx->i2c_ctx->fd);
         return 1;
     }
 
     /* SPI READ */
-    ret = spi_read( reg_addr, reg_data, len, ctx->spi_ctx );
+    ret = spi_read(  ctx->spi_ctx, reg_addr, reg_data, len );
 
     /* CHIP UNSELECT */
-    if( i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0 ) {
+    if( i2c_write_reg(ctx->i2c_ctx, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0 ) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
-        close(ctx->i2c_fd);
+        close(ctx->i2c_ctx->fd);
         return 1;
     }
    
