@@ -1,5 +1,5 @@
 # Name of the final program
-TARGET_NAME = app
+TARGET_NAME = bme-logger
 
 # Extra C Sources
 EXTRA_C_SRCS   += 
