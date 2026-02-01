@@ -22,7 +22,6 @@ extern "C" {
 typedef struct {
     int fd;           // file descriptor /dev/i2c-X
     uint8_t addr;     // indirizzo del dispositivo (0x76 o 0x77)
-    //uint32_t chipsel;
 } rpi_i2c_ctx_t;
 
 

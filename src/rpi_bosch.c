@@ -25,11 +25,9 @@
 #define TCA6408A_CONF_AS_OUTPUT     0x00 // configura come output
 #define TCA6408A_NO_SELECT          0x00 // nessuno selezionato
 
-
 #define OUTPUT_IDLE_STATE           0xFF
 
-/* I2C Helper: imposta lo slave address (idempotente, ma sicuro)
-*/
+/* I2C Helper: ensure slave address (idempotente, ma sicuro) */
 inline int i2c_ensure_slave(int fd, uint8_t addr) {
     if (ioctl(fd, I2C_SLAVE, addr) < 0) {
         return -1;
@@ -37,9 +35,8 @@ inline int i2c_ensure_slave(int fd, uint8_t addr) {
     return 0;
 }
 
-/* I2C Helper: scrive un registro
-*/
-static int i2c_write_reg(int fd, uint8_t reg, uint8_t val) {
+/* I2C Helper: write a register */
+int i2c_write_reg(int fd, uint8_t reg, uint8_t val) {
     uint8_t buf[2] = { reg, val }; 
     ssize_t n = write(fd, buf, sizeof(buf));
     if (n != (ssize_t)sizeof(buf)) {
@@ -48,7 +45,8 @@ static int i2c_write_reg(int fd, uint8_t reg, uint8_t val) {
     return 0;
 }
 
-static int i2c_read_reg(int fd, uint8_t reg, uint8_t *val)
+/* I2C Helper: read a register */
+int i2c_read_reg(int fd, uint8_t reg, uint8_t *val)
 {
     if (!val) return -1;
     uint8_t buf[1] = { reg }; 
@@ -64,8 +62,69 @@ static int i2c_read_reg(int fd, uint8_t reg, uint8_t *val)
     return 0;
 }
 
+/* SPI Helper: write a register */
+int8_t spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, rpi_spi_ctx_t *ctx)
+{
+    if (!ctx || ctx->fd < 0) return BME68X_E_NULL_PTR;
+
+    uint8_t header = reg_addr & 0x7F;
+
+    // Compose [header][payload]
+    uint8_t stack[32];
+    uint8_t *buf = (len + 1 <= sizeof(stack)) ? stack : (uint8_t *)malloc(len + 1);
+    if (!buf) return BME68X_E_COM_FAIL;
+
+    buf[0] = header;
+    if (len && reg_data) memcpy(&buf[1], reg_data, len);
+
+    struct spi_ioc_transfer xfer = {
+        .tx_buf = (unsigned long)buf,
+        .rx_buf = 0,
+        .len    = (uint32_t)(len + 1),
+        .speed_hz = ctx->speed_hz,
+        .bits_per_word = ctx->bits_per_word,
+        .cs_change = 0,   // keep CS asserted only for this transfer
+        .delay_usecs = 0,
+    };
+
+    int ret = ioctl(ctx->fd, SPI_IOC_MESSAGE(1), &xfer);
+    if (buf != stack) free(buf);
+    if (ret < 1) return BME68X_E_COM_FAIL;
+
+    return BME68X_OK;
+}
 
 
+/* SPI Helper: read a register */
+int8_t spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, rpi_spi_ctx_t * ctx)
+{
+    if (!ctx || ctx->fd < 0 || !reg_data || len == 0) return BME68X_E_NULL_PTR;
+
+    uint8_t header = reg_addr | 0x80; // read
+
+    uint8_t tx[1 + 256]; // 1 header + up to 256 data bytes (adjust as needed)
+    uint8_t rx[1 + 256];
+    if (len > 256) return BME68X_E_COM_FAIL;
+
+    tx[0] = header;
+    memset(tx + 1, 0, len);
+
+    struct spi_ioc_transfer xfer = {
+        .tx_buf = (unsigned long)tx,
+        .rx_buf = (unsigned long)rx,
+        .len    = (uint32_t)(1 + len),
+        .speed_hz = ctx->speed_hz,
+        .bits_per_word = ctx->bits_per_word,
+        .cs_change = 0,
+        .delay_usecs = 0,
+    };
+
+    int ret = ioctl(ctx->fd, SPI_IOC_MESSAGE(1), &xfer);
+    if (ret < 1) return BME68X_E_COM_FAIL;
+
+    memcpy(reg_data, rx + 1, len); // skip header byte
+    return BME68X_OK;
+}
 
 
 int rpi_bosch_configure( rpi_bosch_ctx_t * ctx )
@@ -100,7 +159,7 @@ int rpi_bosch_configure( rpi_bosch_ctx_t * ctx )
         return 1;
     }
 
-    /* TCA6480A Polarity Inversion */
+    /* TCA6480A Input Polarity */
     if (i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_POLARITY, 0x00) < 0) {
         fprintf(stderr, "write config failed: %s\n", strerror(errno));
         close(ctx->i2c_fd);
@@ -113,40 +172,7 @@ int rpi_bosch_configure( rpi_bosch_ctx_t * ctx )
         return 1;
     }
 
-    //return rpi_spi_configure( ctx->spi_ctx );
     return 0;
-}
-
-int8_t spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr)
-{
-    rpi_spi_ctx_t *ctx = (rpi_spi_ctx_t *)intf_ptr;
-    if (!ctx || ctx->fd < 0) return BME68X_E_NULL_PTR;
-
-    uint8_t header = reg_addr & 0x7F;
-
-    // Compose [header][payload]
-    uint8_t stack[32];
-    uint8_t *buf = (len + 1 <= sizeof(stack)) ? stack : (uint8_t *)malloc(len + 1);
-    if (!buf) return BME68X_E_COM_FAIL;
-
-    buf[0] = header;
-    if (len && reg_data) memcpy(&buf[1], reg_data, len);
-
-    struct spi_ioc_transfer xfer = {
-        .tx_buf = (unsigned long)buf,
-        .rx_buf = 0,
-        .len    = (uint32_t)(len + 1),
-        .speed_hz = ctx->speed_hz,
-        .bits_per_word = ctx->bits_per_word,
-        .cs_change = 0,   // keep CS asserted only for this transfer
-        .delay_usecs = 0,
-    };
-
-    int ret = ioctl(ctx->fd, SPI_IOC_MESSAGE(1), &xfer);
-    if (buf != stack) free(buf);
-    if (ret < 1) return BME68X_E_COM_FAIL;
-
-    return BME68X_OK;
 }
 
 int8_t rpi_bosch_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr)
@@ -155,11 +181,11 @@ int8_t rpi_bosch_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, 
 
     rpi_bosch_ctx_t *ctx = (rpi_bosch_ctx_t *) intf_ptr;
 
-    if (!ctx || ctx->i2c_fd < 0) {
+    if( !ctx || ctx->i2c_fd < 0 ) {
         return BME68X_E_NULL_PTR;
     } 
     
-    if (i2c_ensure_slave(ctx->i2c_fd, ctx->i2c_addr) < 0) {
+    if( i2c_ensure_slave(ctx->i2c_fd, ctx->i2c_addr) < 0 ) {
         return BME68X_E_COM_FAIL;
     }
 
@@ -170,12 +196,8 @@ int8_t rpi_bosch_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, 
         return 1;
     }
 
-    unsigned char val;
-    i2c_read_reg(ctx->i2c_fd, TCA6408A_REG_INPUT, &val);    
-    fprintf(stderr, "read output: %x\n", val);
-
     /* SPI READ */
-    ret = rpi_spi_write( reg_addr, reg_data, len, ctx->spi_ctx );
+    ret = spi_write( reg_addr, reg_data, len, ctx->spi_ctx );
 
     /* CHIP UNSELECT */
     if( i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0 ) {
@@ -188,49 +210,17 @@ int8_t rpi_bosch_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, 
 }
 
 
-
-int8_t spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr)
-{
-    rpi_spi_ctx_t *ctx = (rpi_spi_ctx_t *)intf_ptr;
-    if (!ctx || ctx->fd < 0 || !reg_data || len == 0) return BME68X_E_NULL_PTR;
-
-    uint8_t header = reg_addr | 0x80; // read
-
-    uint8_t tx[1 + 256]; // 1 header + up to 256 data bytes (adjust as needed)
-    uint8_t rx[1 + 256];
-    if (len > 256) return BME68X_E_COM_FAIL;
-
-    tx[0] = header;
-    memset(tx + 1, 0, len);
-
-    struct spi_ioc_transfer xfer = {
-        .tx_buf = (unsigned long)tx,
-        .rx_buf = (unsigned long)rx,
-        .len    = (uint32_t)(1 + len),
-        .speed_hz = ctx->speed_hz,
-        .bits_per_word = ctx->bits_per_word,
-        .cs_change = 0,
-        .delay_usecs = 0,
-    };
-
-    int ret = ioctl(ctx->fd, SPI_IOC_MESSAGE(1), &xfer);
-    if (ret < 1) return BME68X_E_COM_FAIL;
-
-    memcpy(reg_data, rx + 1, len); // skip header byte
-    return BME68X_OK;
-}
-
 int8_t rpi_bosch_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr)
 {
     int8_t ret;
 
     rpi_bosch_ctx_t *ctx = (rpi_bosch_ctx_t *) intf_ptr;
     
-    if (!ctx || ctx->i2c_fd < 0) {
+    if( !ctx || ctx->i2c_fd < 0 ) {
         return BME68X_E_NULL_PTR;
     } 
     
-    if (i2c_ensure_slave(ctx->i2c_fd, ctx->i2c_addr) < 0) {
+    if( i2c_ensure_slave(ctx->i2c_fd, ctx->i2c_addr) < 0 ) {
         return BME68X_E_COM_FAIL;
     }
 
@@ -242,7 +232,7 @@ int8_t rpi_bosch_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *i
     }
 
     /* SPI READ */
-    ret = rpi_spi_read( reg_addr, reg_data, len, ctx->spi_ctx );
+    ret = spi_read( reg_addr, reg_data, len, ctx->spi_ctx );
 
     /* CHIP UNSELECT */
     if( i2c_write_reg(ctx->i2c_fd, TCA6408A_REG_OUTPUT, OUTPUT_IDLE_STATE) < 0 ) {
