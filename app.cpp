@@ -81,8 +81,6 @@ int main(int argc, char **argv) {
 
         ctx[i].cs_id = 0xFF ^ (1 << i); // active low
 
-        sleep( 1 );
-        
         if (rpi_bosch_configure( &ctx[i] ) < 0) {
             perror("bosch_configure"); 
             close( i2c_fd ); 
@@ -93,7 +91,6 @@ int main(int argc, char **argv) {
 
     
     for (uint8_t i = 0; i < N_KIT_SENS; i++) {
-        sleep( 1 );
         bme[i].begin( BME68X_SPI_INTF, rpi_bosch_read, rpi_bosch_write, rpi_delay_us, (void *) (&ctx[i]) );
 
         if(bme[i].checkStatus()) {
@@ -105,10 +102,8 @@ int main(int argc, char **argv) {
     // Esempio rapido: leggere chip_id
     for (uint8_t i = 0; i < N_KIT_SENS; i++) {
         uint8_t chip_id = 0;
-        sleep( 1 );
 
         chip_id = bme[i].readReg(BME68X_REG_CHIP_ID);
-        //printf("Chip ID: 0x%02X\n", chip_id);
 
         printf( "{ 'idx' : %d,", i );
         printf( " 'chip_id' : 0x%02X }\n", chip_id );
@@ -128,18 +123,6 @@ int main(int argc, char **argv) {
         bme[i].setOpMode(BME68X_PARALLEL_MODE);
     }
 
-    // Esempio rapido: leggere chip_id
-    for (uint8_t i = 0; i < N_KIT_SENS; i++) {
-        uint8_t chip_id = 0;
-        sleep( 1 );
-
-        chip_id = bme[i].readReg(BME68X_REG_CHIP_ID);
-        //printf("Chip ID: 0x%02X\n", chip_id);
-
-        printf( "{ 'idx' : %d,", i );
-        printf( " 'chip_id' : 0x%02X }\n", chip_id );
-    }
-    
     while( 1 ) {
         int16_t indexDiff;
         
