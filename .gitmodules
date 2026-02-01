@@ -1,0 +1,3 @@
+[submodule "bosch-bme68x-library"]
+	path = bosch-bme68x-library
+	url = https://github.com/boschsensortec/Bosch-BME68x-Library.git
