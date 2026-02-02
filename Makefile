@@ -1,5 +1,5 @@
 # Name of the final program
-TARGET_NAME = bme-logger
+TARGET_NAME = bme-grabber
 
 # Extra C Sources
 EXTRA_C_SRCS   += 
